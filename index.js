@@ -13,15 +13,14 @@ app.get('/api/get-link', async (req, res) => {
     const { tmdb, isSeries, season, episode } = req.query;
     if (!tmdb) return res.status(400).json({ error: 'تکایە ئایدی فیلمەکە بنێرە' });
 
-    // 💡 لێرەدا وازمان لە vidsrc هێنا و دوو سایتی زۆر باشترمان داناوە کە کلاودفلێریان نییە
     const sources = isSeries === 'true' 
         ? [
-            `https://autoembed.co/tv/tmdb/${tmdb}-${season || 1}-${episode || 1}`,
-            `https://vidlink.pro/tv/${tmdb}/${season || 1}/${episode || 1}`
+            `https://vidlink.pro/tv/${tmdb}/${season || 1}/${episode || 1}`,
+            `https://autoembed.co/tv/tmdb/${tmdb}-${season || 1}-${episode || 1}`
           ]
         : [
-            `https://autoembed.co/movie/tmdb/${tmdb}`,
-            `https://vidlink.pro/movie/${tmdb}`
+            `https://vidlink.pro/movie/${tmdb}`,
+            `https://autoembed.co/movie/tmdb/${tmdb}`
           ];
 
     let browser;
@@ -41,7 +40,19 @@ app.get('/api/get-link', async (req, res) => {
             ]
         });
         
-        const page = await browser.newPage();
+        // 💡 چەکی نوێ: داخستنی هەموو پۆپ‌ئەپ و تابە نوێیەکانی ڕیکلام لە هەمان چرکەدا!
+        browser.on('targetcreated', async (target) => {
+            if (target.type() === 'page') {
+                const newPage = await target.page();
+                const pages = await browser.pages();
+                // ئەگەر تابێکی نوێ کرایەوە جگە لە تابی سەرەکی، ڕاستەوخۆ دایبخە
+                if (newPage && pages.length > 1 && newPage !== pages[0]) {
+                    await newPage.close();
+                }
+            }
+        });
+
+        const page = (await browser.pages())[0];
         await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
         await page.setViewport({ width: 1080, height: 720 });
         
@@ -49,28 +60,30 @@ app.get('/api/get-link', async (req, res) => {
 
         page.on('response', async (response) => {
             const url = response.url();
-            // گەڕان بەدوای فایلی ڤیدیۆکەدا
             if (url.includes('.m3u8') && !url.includes('ad')) {
                 videoUrl = url;
             }
         });
 
-        // گەڕان بەناو سایتەکاندا یەک بە یەک (ئەگەر یەکەمیان گیرا، دەچێتە دووەم)
         for (const targetUrl of sources) {
             if (videoUrl) break; 
             
             try {
-                await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 20000 });
+                // کاتی چاوەڕوانی زیاترمان دانا بۆ ئەوەی سایتەکە بەتەواوی لۆد بێت
+                await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 35000 });
                 
-                // کلیک کردن بۆ کارپێکردنی ڤیدیۆکە و داخستنی ڕیکلام
-                for (let i = 0; i < 6; i++) {
+                for (let i = 0; i < 8; i++) {
                     if (videoUrl) break;
                     try {
+                        // 💡 چەکی دووەم: هێزی زۆرەملێ! ڕاستەوخۆ بە کۆد ڤیدیۆکە لێدەدات
+                        await page.evaluate(() => {
+                            const videos = document.querySelectorAll('video');
+                            videos.forEach(v => v.play());
+                        });
+                        // هەروەها پەنجەش دەدات نەوەک کۆدەکە بلۆک کرابێت
                         await page.mouse.click(540, 360);
-                        await new Promise(r => setTimeout(r, 500));
-                        await page.mouse.click(540, 360); // دبل کلیک بۆ تێپەڕاندنی ڕیکلام
                     } catch (e) {}
-                    await new Promise(r => setTimeout(r, 1500));
+                    await new Promise(r => setTimeout(r, 2000));
                 }
             } catch (e) {
                 console.log("Error with source: ", targetUrl);
@@ -80,11 +93,10 @@ app.get('/api/get-link', async (req, res) => {
         if (videoUrl) {
             res.json({ success: true, url: videoUrl });
         } else {
-            const pageTitle = await page.title();
             res.status(404).json({ 
                 success: false, 
-                error: 'لە هیچ کامیان نەدۆزرایەوە',
-                debug_title: pageTitle
+                error: 'نەتوانرا لینکەکە بدۆزرێتەوە',
+                debug_title: await page.title().catch(() => "Unknown")
             });
         }
     } catch (error) {

@@ -3,7 +3,6 @@ const cors = require('cors');
 const puppeteer = require('puppeteer-extra');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
 
-// بەکارهێنانی قەڵغانی شاراوە بۆ ئەوەی سایتەکە نەزانێت ئێمە ڕۆبۆتین
 puppeteer.use(StealthPlugin());
 
 const app = express();
@@ -23,7 +22,7 @@ app.get('/api/get-link', async (req, res) => {
     try {
         browser = await puppeteer.launch({
             headless: true,
-            executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/google-chrome-stable',
+            // 💡 شوێنی کرۆممان سڕییەوە بۆ ئەوەی خۆی ئۆتۆماتیکی بیدۆزێتەوە
             args: [
                 '--no-sandbox',
                 '--disable-setuid-sandbox',
@@ -41,7 +40,6 @@ app.get('/api/get-link', async (req, res) => {
         
         let videoUrl = null;
 
-        // ڕادارەکە: گرتنی داتاکان و بلۆککردنی ڕیکلام
         await page.setRequestInterception(true);
         page.on('request', (request) => {
             const url = request.url();
@@ -61,11 +59,10 @@ app.get('/api/get-link', async (req, res) => {
 
         await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
 
-        // لێدانی پەنجەی ئەلیکترۆنی لە ناوەڕاستی شاشەکە بۆ لێدانی ڤیدیۆکە
         for (let i = 0; i < 6; i++) {
             if (videoUrl) break;
             try {
-                await page.mouse.click(540, 360); // ڕێک ناوەڕاستی شاشەکە
+                await page.mouse.click(540, 360);
             } catch (e) {}
             await new Promise(r => setTimeout(r, 1000));
         }

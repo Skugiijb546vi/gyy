@@ -13,11 +13,16 @@ app.get('/api/get-link', async (req, res) => {
     const { tmdb, isSeries, season, episode } = req.query;
     if (!tmdb) return res.status(400).json({ error: 'تکایە ئایدی فیلمەکە بنێرە' });
 
-    // بەکارهێنانی باشترین دۆمەینی سایتەکە
-    let targetUrl = `https://vidsrc.net/embed/movie?tmdb=${tmdb}`;
-    if (isSeries === 'true') {
-        targetUrl = `https://vidsrc.net/embed/tv?tmdb=${tmdb}&season=${season || 1}&episode=${episode || 1}`;
-    }
+    // 💡 لێرەدا وازمان لە vidsrc هێنا و دوو سایتی زۆر باشترمان داناوە کە کلاودفلێریان نییە
+    const sources = isSeries === 'true' 
+        ? [
+            `https://autoembed.co/tv/tmdb/${tmdb}-${season || 1}-${episode || 1}`,
+            `https://vidlink.pro/tv/${tmdb}/${season || 1}/${episode || 1}`
+          ]
+        : [
+            `https://autoembed.co/movie/tmdb/${tmdb}`,
+            `https://vidlink.pro/movie/${tmdb}`
+          ];
 
     let browser;
     try {
@@ -37,8 +42,6 @@ app.get('/api/get-link', async (req, res) => {
         });
         
         const page = await browser.newPage();
-        
-        // خۆگۆڕین بۆ ئەوەی سایتەکە نەزانێت ڕۆبۆتین
         await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
         await page.setViewport({ width: 1080, height: 720 });
         
@@ -47,34 +50,41 @@ app.get('/api/get-link', async (req, res) => {
         page.on('response', async (response) => {
             const url = response.url();
             // گەڕان بەدوای فایلی ڤیدیۆکەدا
-            if (url.includes('.m3u8')) {
+            if (url.includes('.m3u8') && !url.includes('ad')) {
                 videoUrl = url;
             }
         });
 
-        await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
-
-        // لێدانی پەنجەی زیرەک بۆ بڕینی ڕیکلام و کارپێکردنی ڤیدیۆ
-        for (let i = 0; i < 10; i++) {
-            if (videoUrl) break;
+        // گەڕان بەناو سایتەکاندا یەک بە یەک (ئەگەر یەکەمیان گیرا، دەچێتە دووەم)
+        for (const targetUrl of sources) {
+            if (videoUrl) break; 
+            
             try {
-                await page.mouse.click(540, 360);
-            } catch (e) {}
-            // چاوەڕێکردنێکی زیاتر تا ڕیکلامەکە دەڕوات
-            await new Promise(r => setTimeout(r, 1500));
+                await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 20000 });
+                
+                // کلیک کردن بۆ کارپێکردنی ڤیدیۆکە و داخستنی ڕیکلام
+                for (let i = 0; i < 6; i++) {
+                    if (videoUrl) break;
+                    try {
+                        await page.mouse.click(540, 360);
+                        await new Promise(r => setTimeout(r, 500));
+                        await page.mouse.click(540, 360); // دبل کلیک بۆ تێپەڕاندنی ڕیکلام
+                    } catch (e) {}
+                    await new Promise(r => setTimeout(r, 1500));
+                }
+            } catch (e) {
+                console.log("Error with source: ", targetUrl);
+            }
         }
 
         if (videoUrl) {
             res.json({ success: true, url: videoUrl });
         } else {
-            // ئەگەر نەیدۆزیەوە، پێمان دەڵێت ڕۆبۆتەکە چی بینیوە!
             const pageTitle = await page.title();
-            const pageUrl = page.url();
             res.status(404).json({ 
                 success: false, 
-                error: 'نەتوانرا لینکەکە بدۆزرێتەوە',
-                debug_title: pageTitle,
-                debug_url: pageUrl
+                error: 'لە هیچ کامیان نەدۆزرایەوە',
+                debug_title: pageTitle
             });
         }
     } catch (error) {
@@ -84,10 +94,5 @@ app.get('/api/get-link', async (req, res) => {
     }
 });
 
-app.get('/', (req, res) => {
-    res.send('سێرڤەری SEBAR TV بە سەرکەوتوویی کار دەکات! 🚀');
-});
-
-app.listen(port, () => {
-    console.log(`Server running on port ${port}`);
-});
+app.get('/', (req, res) => res.send('سێرڤەری SEBAR TV بە سەرکەوتوویی کار دەکات! 🚀'));
+app.listen(port, () => console.log(`Server running on port ${port}`));

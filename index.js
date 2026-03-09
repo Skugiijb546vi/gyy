@@ -13,9 +13,10 @@ app.get('/api/get-link', async (req, res) => {
     const { tmdb, isSeries, season, episode } = req.query;
     if (!tmdb) return res.status(400).json({ error: 'تکایە ئایدی فیلمەکە بنێرە' });
 
-    let targetUrl = `https://vidsrcme.ru/embed/movie?tmdb=${tmdb}`;
+    // بەکارهێنانی سایتی فەرمی کە خۆت باست کرد و ئیشی کرد لە 1DM
+    let targetUrl = `https://vidsrc.me/embed/movie?tmdb=${tmdb}`;
     if (isSeries === 'true') {
-        targetUrl = `https://vidsrcme.ru/embed/tv?tmdb=${tmdb}&season=${season || 1}&episode=${episode || 1}`;
+        targetUrl = `https://vidsrc.me/embed/tv?tmdb=${tmdb}&season=${season || 1}&episode=${episode || 1}`;
     }
 
     let browser;
@@ -31,62 +32,64 @@ app.get('/api/get-link', async (req, res) => {
                 '--no-zygote',
                 '--single-process',
                 '--disable-gpu',
-                '--js-flags="--max-old-space-size=256"',
-                '--autoplay-policy=no-user-gesture-required' // 💡 ڕێگەپێدان بە لێدانی ڤیدیۆ بەبێ پەنجەدان
+                '--js-flags="--max-old-space-size=256"'
             ]
-        });
-        
-        browser.on('targetcreated', async (target) => {
-            if (target.type() === 'page') {
-                const newPage = await target.page();
-                const pages = await browser.pages();
-                if (newPage && pages.length > 1 && newPage !== pages[0]) {
-                    await newPage.close();
-                }
-            }
         });
 
         const page = (await browser.pages())[0];
-        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
-        await page.setViewport({ width: 1080, height: 720 });
-        
+
+        // 💡 لاساییکردنەوەی بەرنامەی 1DM (خۆگۆڕین بۆ مۆبایلێکی گالاکسی)
+        await page.setUserAgent('Mozilla/5.0 (Linux; Android 13; SM-S918B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36');
+        await page.setViewport({ width: 412, height: 915, isMobile: true });
+
         let videoUrl = null;
+
+        // 💡 بلۆککەری ڕیکلامی دڕندە (هاوشێوەی 1DM)
+        await page.setRequestInterception(true);
+        page.on('request', (request) => {
+            const url = request.url();
+            const type = request.resourceType();
+
+            // بلۆککردنی وێنە و فۆنت بۆ خێرایی
+            if (['image', 'stylesheet', 'font', 'media'].includes(type)) {
+                request.abort();
+                return;
+            }
+
+            // بلۆککردنی هەموو ئەو سکریپتانەی کە ناوی ڕیکلامیان تێدایە یان هی کۆمپانیای ترن
+            const badKeywords = ['pop', 'ad', 'track', 'stat', 'analytic', 'jejune', 'north-extn', 'yahoo', 'universal'];
+            if (badKeywords.some(keyword => url.toLowerCase().includes(keyword))) {
+                request.abort();
+                return;
+            }
+
+            request.continue();
+        });
 
         page.on('response', async (response) => {
             const url = response.url();
-            if (url.includes('.m3u8') && !url.includes('ad')) {
+            // ڕاوکەری میدیا (Media Sniffer) بۆ گرتنی لینکی m3u8
+            if (url.includes('.m3u8')) {
                 videoUrl = url;
             }
         });
 
         await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 35000 });
 
-        for (let i = 0; i < 15; i++) {
+        // 💡 لێدانی دوگمەی پلەی هەروەک چۆن تۆ لەسەر شاشەی مۆبایلەکەت دەیکەیت
+        for (let i = 0; i < 10; i++) {
             if (videoUrl) break;
             try {
-                await page.mouse.click(540, 360);
-                
-                // 💡 چوونە ناو هەموو بۆکسە شاراوەکانی سایتەکە (Iframes)
-                const frames = page.frames();
-                for (const frame of frames) {
-                    try {
-                        await frame.evaluate(() => {
-                            const video = document.querySelector('video');
-                            if (video) {
-                                video.muted = true; // دەبێت بێدەنگ بێت تا کۆد کار بکات
-                                video.play();
-                            }
-                        });
-                    } catch(e) {}
-                }
+                // بە زۆر کرتە دەکەین لە ناوەڕاستی شاشەی مۆبایلەکە
+                await page.mouse.click(206, 457);
             } catch (e) {}
-            await new Promise(r => setTimeout(r, 1500));
+            await new Promise(r => setTimeout(r, 1000));
         }
 
         if (videoUrl) {
             res.json({ success: true, url: videoUrl });
         } else {
-            res.status(404).json({ success: false, error: 'نەتوانرا لەناو چوارچێوەکانیشدا بدۆزرێتەوە' });
+            res.status(404).json({ success: false, error: 'هێشتا نەدۆزرایەوە بە شێوازی 1DM' });
         }
     } catch (error) {
         res.status(500).json({ success: false, error: error.message });

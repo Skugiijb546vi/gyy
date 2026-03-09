@@ -32,10 +32,10 @@ app.get('/api/get-link', async (req, res) => {
                 '--single-process',
                 '--disable-gpu',
                 '--js-flags="--max-old-space-size=256"',
+                '--autoplay-policy=no-user-gesture-required' // 💡 ڕێگەپێدان بە لێدانی ڤیدیۆ بەبێ پەنجەدان
             ]
         });
         
-        // 💡 داخستنی هەر تابێکی ڕیکلام لە هەمان میللی چرکەدا کە دەیەوێت بکرێتەوە
         browser.on('targetcreated', async (target) => {
             if (target.type() === 'page') {
                 const newPage = await target.page();
@@ -52,25 +52,6 @@ app.get('/api/get-link', async (req, res) => {
         
         let videoUrl = null;
 
-        // 💡 بلۆککردنی فایلە قورسەکان و ئەو ڕیکلامانەی کە خۆت دۆزیتەوە!
-        await page.setRequestInterception(true);
-        page.on('request', (request) => {
-            const url = request.url();
-            const resourceType = request.resourceType();
-            
-            // با وێنە و شتە بێسوودەکان لۆد نەبن بۆ ئەوەی ڕام پڕ نەبێت
-            if (resourceType === 'image' || resourceType === 'stylesheet' || resourceType === 'font') {
-                request.abort();
-            }
-            // کوشتنی ڕیکلامەکانی سایتەکە پێش لۆدبوونیان
-            else if (url.includes('yahoo') || url.includes('north-extn') || url.includes('universal-translation') || url.includes('ad')) {
-                request.abort();
-            }
-            else {
-                request.continue();
-            }
-        });
-
         page.on('response', async (response) => {
             const url = response.url();
             if (url.includes('.m3u8') && !url.includes('ad')) {
@@ -80,30 +61,32 @@ app.get('/api/get-link', async (req, res) => {
 
         await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 35000 });
 
-        // 💡 لۆژیکی زیرەک: لەبری تەنها پەنجەدان، قەڵغانە شاراوەکان دەسڕینەوە ئینجا پەنجە دەدەین
         for (let i = 0; i < 15; i++) {
             if (videoUrl) break;
             try {
-                // هێرشی جاڤاسکریپت بۆ ناو سکریپتەکانی سایتەکە
-                await page.evaluate(() => {
-                    // سڕینەوەی ئەو لینکانەی کە دەبنە هۆی کردنەوەی ڕیکلام (پۆپ ئەپ)
-                    document.querySelectorAll('a[href], iframe[src*="ad"]').forEach(el => el.remove());
-                    // هەوڵدان بۆ لێدانی ڤیدیۆکە بە زۆر
-                    const video = document.querySelector('video');
-                    if (video) video.play();
-                });
-                
-                // پەنجەدان لە ڕێک چەقی شاشەکە پاش سڕینەوەی قەڵغانەکان
                 await page.mouse.click(540, 360);
+                
+                // 💡 چوونە ناو هەموو بۆکسە شاراوەکانی سایتەکە (Iframes)
+                const frames = page.frames();
+                for (const frame of frames) {
+                    try {
+                        await frame.evaluate(() => {
+                            const video = document.querySelector('video');
+                            if (video) {
+                                video.muted = true; // دەبێت بێدەنگ بێت تا کۆد کار بکات
+                                video.play();
+                            }
+                        });
+                    } catch(e) {}
+                }
             } catch (e) {}
-            // یەک چرکە چاوەڕێ دەکات و دووبارە هێرش دەباتەوە
-            await new Promise(r => setTimeout(r, 1000));
+            await new Promise(r => setTimeout(r, 1500));
         }
 
         if (videoUrl) {
             res.json({ success: true, url: videoUrl });
         } else {
-            res.status(404).json({ success: false, error: 'نەتوانرا لینکەکە بدۆزرێتەوە سەرەڕای هێرشەکە' });
+            res.status(404).json({ success: false, error: 'نەتوانرا لەناو چوارچێوەکانیشدا بدۆزرێتەوە' });
         }
     } catch (error) {
         res.status(500).json({ success: false, error: error.message });
